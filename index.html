@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="zh-Hant">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -7,29 +8,68 @@
     <link rel="stylesheet" href="https://pyscript.net/releases/2024.1.1/core.css" />
     <script type="module" src="https://pyscript.net/releases/2024.1.1/core.js"></script>
     <style>
-        body { font-family: sans-serif; display: flex; flex-direction: column; align-items: center; padding: 50px; background: #f4f4f9; }
-        .container { background: white; padding: 2rem; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        body {
+            font-family: sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            background: #f4f4f9;
+            margin: 0;
+        }
 
+        .container {
+            background: white;
+            padding: 2rem;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            text-align: center;
+            width: 350px;
+        }
+
+        button {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            margin-top: 10px;
+        }
+
+        button:hover {
+            background: #45a049;
+        }
+
+        #status {
+            margin-top: 15px;
+            color: #555;
+            font-size: 14px;
+        }
     </style>
 </head>
+
 <body>
 
-<div class="container">
-    <h2>JPG to PDF</h2>
-    <p>選擇檔案：</p>
-    <input type="file" id="file-upload" accept="image/jpeg, image/png" multiple>
-    <br><br>
-    <button id="convert-btn" py-click="convert_logic">Start and Download</button>
-</div>
+    <div class="container">
+        <h2>JPG to PDF</h2>
+        <p>選擇檔案：</p>
+        <input type="file" id="file-upload" accept="image/jpeg, image/png" multiple>
+        <br>
+        <button id="convert-btn">Start and Download</button>
+        <div id="status">Ready</div>
+    </div>
 
-<py-config>
-    packages = ["Pillow"]
-</py-config>
+    <py-config>
+        packages = ["Pillow"]
+    </py-config>
 
-<script type="py">
+    <script type="py">
     import io
     from PIL import Image
-    from js import document, Uint8Array, window, File, URL
+    from js import document, Uint8Array, window, URL
     from pyodide.ffi import create_proxy
 
     async def convert_logic(event):
@@ -43,39 +83,45 @@
 
         status_div.innerText = "正在轉換中..."
 
-        image_list = []
+        try:
+            image_list = []
+            
+            for i in range(len(files)):
+                file = files.item(i)
+                array_buf = await file.arrayBuffer()
+                uint8_view = Uint8Array.new(array_buf)
+                python_bytes = uint8_view.to_py()
+                img = Image.open(io.BytesIO(python_bytes)).convert('RGB')
+                image_list.append(img)
+
+            if image_list:
+                pdf_bytes_io = io.BytesIO()
+                first_img = image_list.pop(0)
+                first_img.save(pdf_bytes_io, format="PDF", save_all=True, append_images=image_list)
+                
+                pdf_data = pdf_bytes_io.getvalue()
+                js_array = Uint8Array.new(pdf_data)
+                
+                blob = window.Blob.new([js_array], {type: "application/pdf"})
+                url = URL.createObjectURL(blob)
+                
+                link = document.createElement("a")
+                link.href = url
+                link.download = "converted_images.pdf"
+                document.body.appendChild(link)
+                link.click()
+                document.body.removeChild(link)
+                URL.revokeObjectURL(url)
+                
+                status_div.innerText = "檔案已下載"
         
-        # 讀取檔案
-        for i in range(len(files)):
-            file = files.item(i)
-            array_buf = await file.arrayBuffer()
-            python_bytes = array_buf.to_bytes()
-            img = Image.open(io.BytesIO(python_bytes)).convert('RGB')
-            image_list.append(img)
+        except Exception as e:
+            status_div.innerText = f"發生錯誤：{str(e)}"
 
-        # 執行轉換
-        if image_list:
-            pdf_bytes_io = io.BytesIO()
-            first_img = image_list.pop(0)
-            first_img.save(pdf_bytes_io, format="PDF", save_all=True, append_images=image_list)
-            
-            pdf_data = pdf_bytes_io.getvalue()
-            js_array = Uint8Array.new(pdf_data)
-            
-            # 建立下載連結
-            blob = window.Blob.new([js_array], {type: "application/pdf"})
-            url = URL.createObjectURL(blob)
-            
-            link = document.createElement("a")
-            link.href = url
-            link.download = "converted_images.pdf"
-            document.body.appendChild(link)
-            link.click()
-            document.body.removeChild(link)
-            
-            status_div.innerText = "檔案已下載"
-
+    btn = document.getElementById("convert-btn")
+    btn.onclick = create_proxy(convert_logic)
 </script>
 
 </body>
+
 </html>
