@@ -1,20 +1,19 @@
 <!DOCTYPE html>
-<html lang="zh-Hant">
+<html lang="en">
 
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>JPG to PDF</title>
-    <link rel="stylesheet" href="https://pyscript.net/releases/2024.1.1/core.css" />
-    <script type="module" src="https://pyscript.net/releases/2024.1.1/core.js"></script>
+    <title>Image to PDF Tool (With Preview & Reorder)</title>
+    <!-- Include jsPDF library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <style>
         body {
             font-family: sans-serif;
             display: flex;
             flex-direction: column;
             align-items: center;
-            justify-content: center;
-            height: 100vh;
+            padding: 30px;
             background: #f4f4f9;
             margin: 0;
         }
@@ -24,26 +23,125 @@
             padding: 2rem;
             border-radius: 8px;
             box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            width: 500px;
+            max-width: 100%;
+            box-sizing: border-box;
+        }
+
+        h2 {
             text-align: center;
-            width: 350px;
+            color: #333;
+        }
+
+        .upload-box {
+            border: 2px dashed #ccc;
+            padding: 20px;
+            text-align: center;
+            border-radius: 6px;
+            cursor: pointer;
+            background: #fafafa;
+            margin-bottom: 20px;
+        }
+
+        .upload-box:hover {
+            background: #f0f0f5;
+        }
+
+        #file-list {
+            list-style: none;
+            padding: 0;
+            margin: 0 0 20px 0;
+            max-height: 350px;
+            overflow-y: auto;
+        }
+
+        .file-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: #fff;
+            border: 1px solid #ddd;
+            padding: 8px 12px;
+            margin-bottom: 8px;
+            border-radius: 4px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+        }
+
+        .file-info {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            overflow: hidden;
+        }
+
+        .file-thumb {
+            width: 40px;
+            height: 40px;
+            object-fit: cover;
+            border-radius: 4px;
+            border: 1px solid #ccc;
+        }
+
+        .file-name {
+            font-size: 14px;
+            color: #333;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 180px;
+        }
+
+        .btn-group {
+            display: flex;
+            gap: 5px;
         }
 
         button {
-            background: #4CAF50;
-            color: white;
-            border: none;
-            padding: 10px 15px;
+            background: #f0f0f0;
+            border: 1px solid #ccc;
+            padding: 5px 10px;
             border-radius: 4px;
             cursor: pointer;
-            font-size: 16px;
-            margin-top: 10px;
+            font-size: 13px;
         }
 
         button:hover {
+            background: #e0e0e0;
+        }
+
+        .btn-danger {
+            background: #ff4d4d;
+            color: white;
+            border: none;
+        }
+
+        .btn-danger:hover {
+            background: #cc0000;
+        }
+
+        #convert-btn {
+            width: 100%;
+            background: #4CAF50;
+            color: white;
+            border: none;
+            padding: 12px;
+            border-radius: 4px;
+            font-size: 16px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+
+        #convert-btn:hover {
             background: #45a049;
         }
 
+        #convert-btn:disabled {
+            background: #cccccc;
+            cursor: not-allowed;
+        }
+
         #status {
+            text-align: center;
             margin-top: 15px;
             color: #555;
             font-size: 14px;
@@ -54,73 +152,147 @@
 <body>
 
     <div class="container">
-        <h2>JPG to PDF</h2>
-        <p>選擇檔案：</p>
-        <input type="file" id="file-upload" accept="image/jpeg, image/png" multiple>
-        <br>
-        <button id="convert-btn">Start and Download</button>
-        <div id="status">Ready</div>
+        <h2>Image to PDF Converter</h2>
+
+        <div class="upload-box" onclick="document.getElementById('file-upload').click()">
+            <p>Click here or select multiple images (JPG, PNG)</p>
+            <input type="file" id="file-upload" accept="image/jpeg, image/png" multiple style="display: none;">
+        </div>
+
+        <!-- Image reorder list -->
+        <ul id="file-list"></ul>
+
+        <button id="convert-btn" onclick="generatePDF()" disabled>Merge & Download PDF</button>
+        <div id="status">Please select images first</div>
     </div>
 
-    <py-config>
-        packages = ["Pillow"]
-    </py-config>
+    <script>
+        let imageFiles = [];
 
-    <script type="py">
-    import io
-    from PIL import Image
-    from js import document, Uint8Array, window, URL
-    from pyodide.ffi import create_proxy
+        const fileInput = document.getElementById('file-upload');
+        const fileListEl = document.getElementById('file-list');
+        const convertBtn = document.getElementById('convert-btn');
+        const statusEl = document.getElementById('status');
 
-    async def convert_logic(event):
-        status_div = document.getElementById("status")
-        file_input = document.getElementById("file-upload")
-        files = file_input.files
-        
-        if len(files) == 0:
-            status_div.innerText = "選擇檔案"
-            return
+        fileInput.addEventListener('change', (e) => {
+            const files = Array.from(e.target.files);
+            if (files.length === 0) return;
 
-        status_div.innerText = "正在轉換中..."
+            imageFiles = imageFiles.concat(files);
+            fileInput.value = '';
+            renderList();
+        });
 
-        try:
-            image_list = []
-            
-            for i in range(len(files)):
-                file = files.item(i)
-                array_buf = await file.arrayBuffer()
-                uint8_view = Uint8Array.new(array_buf)
-                python_bytes = uint8_view.to_py()
-                img = Image.open(io.BytesIO(python_bytes)).convert('RGB')
-                image_list.append(img)
+        function renderList() {
+            fileListEl.innerHTML = '';
 
-            if image_list:
-                pdf_bytes_io = io.BytesIO()
-                first_img = image_list.pop(0)
-                first_img.save(pdf_bytes_io, format="PDF", save_all=True, append_images=image_list)
-                
-                pdf_data = pdf_bytes_io.getvalue()
-                js_array = Uint8Array.new(pdf_data)
-                
-                blob = window.Blob.new([js_array], {type: "application/pdf"})
-                url = URL.createObjectURL(blob)
-                
-                link = document.createElement("a")
-                link.href = url
-                link.download = "converted_images.pdf"
-                document.body.appendChild(link)
-                link.click()
-                document.body.removeChild(link)
-                URL.revokeObjectURL(url)
-                
-                status_div.innerText = "檔案已下載"
-        
-        except Exception as e:
-            status_div.innerText = f"發生錯誤：{str(e)}"
+            if (imageFiles.length === 0) {
+                statusEl.innerText = "Please select images first";
+                convertBtn.disabled = true;
+                return;
+            }
 
-    btn = document.getElementById("convert-btn")
-    btn.onclick = create_proxy(convert_logic)
-</script>
+            statusEl.innerText = `Selected ${imageFiles.length} image(s) (Order adjustable)`;
+            convertBtn.disabled = false;
+
+            imageFiles.forEach((file, index) => {
+                const li = document.createElement('li');
+                li.className = 'file-item';
+
+                const objUrl = URL.createObjectURL(file);
+
+                li.innerHTML = `
+                <div class="file-info">
+                    <span style="font-weight:bold; color:#888; font-size:12px;">#${index + 1}</span>
+                    <img src="${objUrl}" class="file-thumb" alt="Preview">
+                    <span class="file-name" title="${file.name}">${file.name}</span>
+                </div>
+                <div class="btn-group">
+                    <button onclick="moveItem(${index}, -1)" ${index === 0 ? 'disabled' : ''}>⬆️</button>
+                    <button onclick="moveItem(${index}, 1)" ${index === imageFiles.length - 1 ? 'disabled' : ''}>⬇️</button>
+                    <button class="btn-danger" onclick="removeItem(${index})">❌</button>
+                </div>
+            `;
+                fileListEl.appendChild(li);
+            });
+        }
+
+        window.moveItem = function (index, direction) {
+            const targetIndex = index + direction;
+            if (targetIndex < 0 || targetIndex >= imageFiles.length) return;
+
+            const temp = imageFiles[index];
+            imageFiles[index] = imageFiles[targetIndex];
+            imageFiles[targetIndex] = temp;
+
+            renderList();
+        }
+
+        window.removeItem = function (index) {
+            imageFiles.splice(index, 1);
+            renderList();
+        }
+
+        function fileToDataURL(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(reader.result);
+                reader.onerror = reject;
+                reader.readAsDataURL(file);
+            });
+        }
+
+        window.generatePDF = async function () {
+            if (imageFiles.length === 0) return;
+
+            convertBtn.disabled = true;
+            statusEl.innerText = "Processing and generating PDF, please wait...";
+
+            try {
+                const { jsPDF } = window.jspdf;
+                const doc = new jsPDF();
+
+                for (let i = 0; i < imageFiles.length; i++) {
+                    const file = imageFiles[i];
+                    const dataUrl = await fileToDataURL(file);
+
+                    const imgObj = new Image();
+                    imgObj.src = dataUrl;
+                    await new Promise((resolve) => { imgObj.onload = resolve; });
+
+                    const imgWidth = imgObj.width;
+                    const imgHeight = imgObj.height;
+
+                    const pageWidth = doc.internal.pageSize.getWidth();
+                    const pageHeight = doc.internal.pageSize.getHeight();
+
+                    let ratio = imgWidth / imgHeight;
+                    let width = pageWidth;
+                    let height = pageWidth / ratio;
+
+                    if (height > pageHeight) {
+                        height = pageHeight;
+                        width = pageHeight * ratio;
+                    }
+
+                    if (i > 0) {
+                        doc.addPage();
+                    }
+
+                    doc.addImage(dataUrl, 'JPEG', (pageWidth - width) / 2, (pageHeight - height) / 2, width, height);
+                }
+
+                doc.save("merged_images.pdf");
+                statusEl.innerText = "Success! PDF downloaded automatically.";
+                convertBtn.disabled = false;
+
+            } catch (error) {
+                console.error(error);
+                statusEl.innerText = "Error: " + error.message;
+                convertBtn.disabled = false;
+            }
+        }
+    </script>
 
 </body>
 
